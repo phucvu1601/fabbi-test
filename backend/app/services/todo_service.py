@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.redis import RedisClient
 from app.models.todo import Todo
 from app.schemas.todo import TodoCreate
 
@@ -28,7 +29,14 @@ async def get_todos(
     limit: int = 20,
 ) -> tuple[list[Todo], int]:
     """Get all todos with pagination for a specific user."""
-    query = select(Todo).where(Todo.user_id == user_id).offset(skip).limit(limit)
+    # Ensure consistent pagination ordering (newest first)
+    query = (
+        select(Todo)
+        .where(Todo.user_id == user_id)
+        .order_by(Todo.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
     result = await db.execute(query)
     todos = list(result.scalars().all())
 
@@ -55,3 +63,14 @@ async def update_todo(db: AsyncSession, todo: Todo, update_data: dict) -> Todo:
 async def delete_todo(db: AsyncSession, todo: Todo) -> None:
     await db.delete(todo)
     await db.flush()
+
+async def invalidate_user_cache(redis: RedisClient, user_id: uuid.UUID) -> None:
+    """Clear all cached todo list pages for a specific user."""
+    pattern = f"todos:user:{user_id}:*"
+
+    # Scan and collect all matching keys
+    keys_to_delete = [key async for key in redis.scan_iter(match=pattern)]
+
+    # Delete collected keys in a single batch
+    if keys_to_delete:
+        await redis.delete_many(keys_to_delete)

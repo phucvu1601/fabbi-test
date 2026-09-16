@@ -15,6 +15,7 @@ from app.services.todo_service import (
     delete_todo,
     get_todo_by_id,
     get_todos,
+    invalidate_user_cache,
     update_todo,
 )
 
@@ -34,7 +35,8 @@ async def list_todos(
     """Get paginated list of todos."""
     skip = (page - 1) * size
 
-    cache_key = "todos:list"
+    # FIX 1: Dynamic Cache Key including user_id, page and size
+    cache_key = f"todos:user:{current_user.id}:page:{page}:size:{size}"
 
     # Try to get from cache
     cached = await redis.get(cache_key)
@@ -44,22 +46,20 @@ async def list_todos(
 
     todos, total = await get_todos(db, user_id=current_user.id, skip=skip, limit=size)
 
-    items = []
-    for todo in todos:
-        user_result = await db.execute(select(User).where(User.id == todo.user_id))
-        user = user_result.scalar_one_or_none()
-        items.append(
-            TodoResponse(
-                id=todo.id,
-                title=todo.title,
-                description=todo.description,
-                completed=todo.completed,
-                user_id=todo.user_id,
-                created_at=todo.created_at,
-                updated_at=todo.updated_at,
-                user_email=user.email if user else None,
-            )
+    # FIX 2: Prevent N+1 query by using current_user context directly
+    items = [
+        TodoResponse(
+            id=todo.id,
+            title=todo.title,
+            description=todo.description,
+            completed=todo.completed,
+            user_id=todo.user_id,
+            created_at=todo.created_at,
+            updated_at=todo.updated_at,
+            user_email=current_user.email,  # Reused from auth context
         )
+        for todo in todos
+    ]
 
     response = TodoListResponse(
         items=items,
@@ -79,9 +79,14 @@ async def create_new_todo(
     todo_data: TodoCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: RedisClient = Depends(get_redis),
 ):
     """Create a new todo item."""
     todo = await create_todo(db, todo_data, current_user.id)
+    
+    # FIX 3: Invalidate user's list cache after creating a todo
+    await invalidate_user_cache(redis, current_user.id)
+    
     return todo
 
 
@@ -131,6 +136,9 @@ async def update_existing_todo(
 
     updated_todo = await update_todo(db, todo, {})
 
+    # FIX 3: Invalidate user's list cache after updating a todo
+    await invalidate_user_cache(redis, current_user.id)
+
     return updated_todo
 
 
@@ -150,5 +158,8 @@ async def delete_existing_todo(
         )
 
     await delete_todo(db, todo)
+
+    # FIX 3: Invalidate user's list cache after deleting a todo
+    await invalidate_user_cache(redis, current_user.id)
 
     return None
