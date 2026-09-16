@@ -1,19 +1,17 @@
 import json
-import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_redis
+from app.api.deps import get_current_user, get_redis, get_valid_todo
 from app.core.redis import RedisClient
 from app.db.session import get_db
+from app.models.todo import Todo
 from app.models.user import User
 from app.schemas.todo import TodoCreate, TodoListResponse, TodoResponse, TodoUpdate
 from app.services.todo_service import (
     create_todo,
     delete_todo,
-    get_todo_by_id,
     get_todos,
     invalidate_user_cache,
     update_todo,
@@ -92,49 +90,26 @@ async def create_new_todo(
 
 @router.get("/{todo_id}", response_model=TodoResponse)
 async def get_todo(
-    todo_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    todo: Todo = Depends(get_valid_todo),
 ):
     """Get a specific todo by ID."""
-    todo = await get_todo_by_id(db, todo_id)
-    if not todo:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Todo not found",
-        )
-
     return todo
 
 
 @router.put("/{todo_id}", response_model=TodoResponse)
 async def update_existing_todo(
-    todo_id: uuid.UUID,
     todo_data: TodoUpdate,
+    todo: Todo = Depends(get_valid_todo),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     redis: RedisClient = Depends(get_redis),
 ):
     """Update a todo item."""
-    todo = await get_todo_by_id(db, todo_id)
-    if not todo:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Todo not found",
-        )
+    # Extract only explicitly sent fields
+    update_data = todo_data.model_dump(exclude_unset=True)
 
-    update_data = todo_data.model_dump()
-
-    if todo_data.completed:
-        todo.completed = todo_data.completed
-
-    # Apply other updates
-    if update_data.get("title") is not None:
-        todo.title = update_data["title"]
-    if "description" in update_data:
-        todo.description = update_data["description"]
-
-    updated_todo = await update_todo(db, todo, {})
+    # Apply updates via service
+    updated_todo = await update_todo(db, todo, update_data)
 
     # FIX 3: Invalidate user's list cache after updating a todo
     await invalidate_user_cache(redis, current_user.id)
@@ -144,19 +119,12 @@ async def update_existing_todo(
 
 @router.delete("/{todo_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_existing_todo(
-    todo_id: uuid.UUID,
+    todo: Todo = Depends(get_valid_todo),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     redis: RedisClient = Depends(get_redis),
 ):
     """Delete a todo item."""
-    todo = await get_todo_by_id(db, todo_id)
-    if not todo:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Todo not found",
-        )
-
     await delete_todo(db, todo)
 
     # FIX 3: Invalidate user's list cache after deleting a todo
