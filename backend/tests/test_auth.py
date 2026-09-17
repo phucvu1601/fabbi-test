@@ -1,7 +1,11 @@
 """Auth tests."""
 
+from datetime import timedelta
+
 import pytest
 from httpx import AsyncClient
+
+from app.core.security import create_access_token
 
 
 @pytest.mark.asyncio
@@ -75,3 +79,24 @@ async def test_logout(client: AsyncClient):
     )
     assert response.status_code == 200
     assert response.json()["message"] == "Successfully logged out"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("token_kind", ["expired", "tampered"])
+async def test_rejects_expired_or_tampered_access_token(
+    client: AsyncClient, token_kind: str
+):
+    """Expired and tampered access tokens must not authorize requests."""
+    token = create_access_token(
+        data={"sub": "00000000-0000-0000-0000-000000000001"},
+        expires_delta=timedelta(seconds=-1) if token_kind == "expired" else None,
+    )
+    if token_kind == "tampered":
+        token = f"{token[:-1]}{'a' if token[-1] != 'a' else 'b'}"
+
+    response = await client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 401
