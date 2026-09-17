@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useLogout, fetchCurrentUser } from "../api/auth";
+import { queryClient } from "@/lib/queryClient";
 
 export function useAuth() {
   const navigate = useNavigate();
@@ -21,15 +22,19 @@ export function useAuth() {
   });
 
   const logout = () => {
+    // Helper to clean up tokens and cache before redirecting
+    const handleCleanUpAndRedirect = () => {
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
+      queryClient.clear(); // Clear all React Query cache
+      navigate("/login");
+    };
     logoutMutation.mutate(undefined, {
       onSuccess: () => {
-        navigate("/login");
+        handleCleanUpAndRedirect();
       },
       onError: () => {
-        // Even on error, clear local tokens and redirect
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("refresh_token");
-        navigate("/login");
+        handleCleanUpAndRedirect();
       },
     });
   };
