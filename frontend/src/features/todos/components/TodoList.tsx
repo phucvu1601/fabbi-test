@@ -3,12 +3,16 @@ import { TodoItem } from "./TodoItem";
 import { TodoForm } from "./TodoForm";
 import type { Todo } from "../api/todos";
 import { useDeleteTodo, useToggleTodo } from "../api/todos";
+import type { Tag } from "../api/tags";
 
 interface TodoListProps {
   todos: Todo[];
+  selectedIds: Set<string>;
+  onSelect: (id: string, selected: boolean) => void;
+  tags: Tag[];
 }
 
-export function TodoList({ todos }: TodoListProps) {
+export function TodoList({ todos, selectedIds, onSelect, tags }: TodoListProps) {
   const [editingTodo, setEditingTodo] = useState<Todo | null>(null);
   const deleteTodo = useDeleteTodo();
   const toggleTodo = useToggleTodo();
@@ -36,24 +40,27 @@ export function TodoList({ todos }: TodoListProps) {
 
   return (
     <>
-      <div className="space-y-2">
-        {todos.map((todo, index) => (
+      <div className="space-y-3">
+        {todos.map((todo) => (
           <TodoItem
-            key={index}
+            key={todo.id}
             todo={todo}
-            index={index}
             onToggle={handleToggle}
             onEdit={handleEdit}
             onDelete={handleDelete}
+            selected={selectedIds.has(todo.id)}
+            onSelect={onSelect}
           />
         ))}
       </div>
 
       {editingTodo && (
         <TodoForm
+          key={editingTodo.id}
           mode="edit"
           todo={editingTodo}
           open={!!editingTodo}
+          tags={tags}
           onClose={() => setEditingTodo(null)}
         />
       )}
