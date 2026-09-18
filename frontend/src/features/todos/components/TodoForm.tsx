@@ -29,7 +29,9 @@ export function TodoForm({ mode, todo, open, onClose, tags }: TodoFormProps) {
   const updateTodo = useUpdateTodo();
   const attachTag = useAttachTag();
   const detachTag = useDetachTag();
-  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>(
+    () => todo?.tags.map((tag) => tag.id) ?? []
+  );
 
   const {
     register,
