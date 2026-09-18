@@ -23,6 +23,7 @@ test_session_maker = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
 )
+test_redis = MagicMock()
 
 
 @pytest.fixture(scope="session")
@@ -34,11 +35,28 @@ def event_loop():
 
 @pytest.fixture(autouse=True)
 async def setup_db():
+    test_redis.reset_mock()
+    test_redis.get = AsyncMock(return_value=None)
+    test_redis.set = AsyncMock()
+    test_redis.delete = AsyncMock()
+    test_redis.delete_many = AsyncMock()
+
+    async def empty_scan_iter(match=None):
+        if False:
+            yield match
+
+    test_redis.scan_iter = empty_scan_iter
+
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.fixture
+def redis_mock():
+    return test_redis
 
 
 async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -52,11 +70,7 @@ async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 def override_get_redis():
-    mock_redis = MagicMock()
-    mock_redis.get = AsyncMock(return_value=None)
-    mock_redis.set = AsyncMock()
-    mock_redis.delete = AsyncMock()
-    return mock_redis
+    return test_redis
 
 
 app.dependency_overrides[get_db] = override_get_db

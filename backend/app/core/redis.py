@@ -31,8 +31,16 @@ class RedisClient:
     async def delete(self, key: str):
         await self._redis.delete(key)
 
+    async def delete_many(self, keys: list[str]):
+        if keys and self._redis:
+            await self._redis.delete(*keys)
+
     async def exists(self, key: str) -> bool:
         return await self._redis.exists(key)
 
+    def scan_iter(self, match: str | None = None, count: int | None = None):
+        if self._redis is None:
+            raise RuntimeError("RedisClient is not initialized.")
+        return self._redis.scan_iter(match=match, count=count)
 
 redis_client = RedisClient()

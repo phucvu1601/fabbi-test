@@ -1,7 +1,10 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_redis
+from app.api.deps import get_current_user, get_redis, security_scheme
 from app.core.redis import RedisClient
 from app.core.security import create_access_token, create_refresh_token, verify_token
 from app.db.session import get_db
@@ -101,9 +104,20 @@ async def refresh_token(
 
 @router.post("/logout")
 async def logout(
+    credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
     current_user: User = Depends(get_current_user),
+    redis: RedisClient = Depends(get_redis),
 ):
-    """Logout user."""
+    """Logout user by blacklisting the current access token."""
+    payload = verify_token(credentials.credentials)
+    if payload:
+        jti = payload.get("jti")
+        exp = payload.get("exp")
+        if jti and exp:
+            ttl = int(exp - datetime.now(timezone.utc).timestamp())
+            if ttl > 0:
+                await redis.set(f"blacklist:{jti}", "1", ex=ttl)
+
     return {"message": "Successfully logged out"}
 
 

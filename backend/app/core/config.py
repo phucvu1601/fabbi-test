@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     DB_ECHO: bool = True
 
     # Redis
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: str = "redis://:fabbi_secret@localhost:6379/0"
 
     # JWT
     JWT_SECRET: str = "super-secret-key-change-in-production"
