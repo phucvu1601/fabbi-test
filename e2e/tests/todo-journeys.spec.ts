@@ -33,11 +33,11 @@ async function login(page: Page, email: string) {
   await page.getByRole("button", { name: "Sign In" }).click();
 
   await expect(page).toHaveURL("/");
-  await expect(page.getByRole("heading", { name: "Todo App" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your todos" })).toBeVisible();
 }
 
 async function createTodo(page: Page, title: string) {
-  await page.getByRole("button", { name: "Add Todo" }).click();
+  await page.getByRole("button", { name: "Add todo" }).click();
 
   const dialog = page.getByRole("dialog");
 
@@ -68,7 +68,7 @@ test("Full User Journey: register, create, complete, verify, and logout", async 
   await page.getByRole("button", { name: "Create Account" }).click();
 
   await expect(page).toHaveURL("/");
-  await expect(page.getByRole("heading", { name: "Todo App" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your todos" })).toBeVisible();
 
   await createTodo(page, todoTitle);
 
@@ -81,7 +81,7 @@ test("Full User Journey: register, create, complete, verify, and logout", async 
   await expect(checkbox).toBeChecked();
   await expect(page.getByText(todoTitle, { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Logout" }).click();
+  await page.getByRole("button", { name: "Log out" }).click();
 
   await expect(page).toHaveURL("/login");
   await expect(
@@ -121,4 +121,53 @@ test("Cross-User Data Isolation: private todos are not visible to another user",
     await contextA.close();
     await contextB.close();
   }
+});
+
+test("Tags, filters, and bulk status actions work together", async ({ page }) => {
+  const email = uniqueEmail("features");
+  const todoTitle = `Tagged todo ${Date.now()}`;
+
+  await page.goto("/register");
+  await page.getByLabel("Email", { exact: true }).fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Confirm Password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Create Account" }).click();
+  await expect(page).toHaveURL("/");
+
+  await page.getByRole("button", { name: "Manage tags" }).click();
+  const tagDialog = page.getByRole("dialog");
+  await tagDialog.getByRole("button", { name: "Create tag" }).click();
+  await expect(tagDialog.getByText("Tag name is required")).toBeVisible();
+  await tagDialog.getByLabel("Name").fill("Project");
+  await tagDialog.getByRole("button", { name: "Create tag" }).click();
+  await expect(tagDialog.getByText("Project", { exact: true })).toBeVisible();
+  await tagDialog.getByRole("button", { name: "Close" }).click();
+
+  await page.getByRole("button", { name: "Add todo" }).click();
+  const todoDialog = page.getByRole("dialog");
+  await todoDialog.getByLabel("Title").fill(todoTitle);
+  await todoDialog.getByRole("button", { name: "Project" }).click();
+  await todoDialog.getByRole("button", { name: "Create" }).click();
+  await expect(todoDialog).toBeHidden();
+  await expect(page.getByText(todoTitle, { exact: true })).toBeVisible();
+
+  const filterRequest = page.waitForRequest(
+    (request) =>
+      request.url().includes("/todos") &&
+      request.url().includes("tag_id=") &&
+      request.url().includes("page_size="),
+  );
+  await page.getByLabel("Filter by tag").selectOption({ label: "Project" });
+  await filterRequest;
+  await expect(page.getByText(todoTitle, { exact: true })).toBeVisible();
+
+  await page
+    .getByRole("button", {
+      name: new RegExp(`Select ${todoTitle} for bulk actions`),
+    })
+    .click();
+  await page.getByRole("button", { name: /Mark done \(1\)/ }).click();
+  await expect(
+    page.getByRole("checkbox", { name: `Mark ${todoTitle} active` }),
+  ).toBeChecked();
 });

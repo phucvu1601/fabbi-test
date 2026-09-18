@@ -250,3 +250,112 @@ async def test_todo_mutations_invalidate_user_cache(
 
     assert response.status_code in (201, 200, 204)
     redis_mock.delete_many.assert_called_with(cache_keys)
+
+
+@pytest.mark.asyncio
+async def test_list_todos_filters_by_status_and_tag(client: AsyncClient):
+    token = await get_auth_token(client, "filters@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    tag_response = await client.post(
+        "/api/v1/tags", json={"name": "Important"}, headers=headers
+    )
+    tag_id = tag_response.json()["id"]
+
+    pending_response = await client.post(
+        "/api/v1/todos", json={"title": "Pending matching"}, headers=headers
+    )
+    completed_response = await client.post(
+        "/api/v1/todos", json={"title": "Completed matching"}, headers=headers
+    )
+    await client.put(
+        f"/api/v1/todos/{completed_response.json()['id']}",
+        json={"completed": True},
+        headers=headers,
+    )
+    await client.post(
+        f"/api/v1/todos/{pending_response.json()['id']}/tags",
+        json={"tag_id": tag_id},
+        headers=headers,
+    )
+
+    pending = await client.get(
+        "/api/v1/todos", params={"status": "false"}, headers=headers
+    )
+    tagged = await client.get(
+        "/api/v1/todos", params={"tag_id": tag_id}, headers=headers
+    )
+
+    assert pending.status_code == 200
+    assert [item["title"] for item in pending.json()["items"]] == [
+        "Pending matching"
+    ]
+    assert tagged.status_code == 200
+    assert [item["title"] for item in tagged.json()["items"]] == [
+        "Pending matching"
+    ]
+    assert tagged.json()["items"][0]["tags"] == [
+        {"id": tag_id, "name": "Important", "color": None}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_bulk_status_rejects_mixed_ownership(client: AsyncClient):
+    owner_token = await get_auth_token(client, "bulk-owner@example.com")
+    other_token = await get_auth_token(client, "bulk-other@example.com")
+    owner_headers = {"Authorization": f"Bearer {owner_token}"}
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+
+    owner_todo = await client.post(
+        "/api/v1/todos", json={"title": "Owner todo"}, headers=owner_headers
+    )
+    other_todo = await client.post(
+        "/api/v1/todos", json={"title": "Other todo"}, headers=other_headers
+    )
+
+    response = await client.patch(
+        "/api/v1/todos/bulk-status",
+        json={
+            "todo_ids": [owner_todo.json()["id"], other_todo.json()["id"]],
+            "completed": True,
+        },
+        headers=owner_headers,
+    )
+
+    assert response.status_code == 404
+    owner_read = await client.get(
+        f"/api/v1/todos/{owner_todo.json()['id']}", headers=owner_headers
+    )
+    assert owner_read.json()["completed"] is False
+
+
+@pytest.mark.asyncio
+async def test_bulk_status_updates_owned_todos_and_invalidates_cache(
+    client: AsyncClient, redis_mock
+):
+    token = await get_auth_token(client, "bulk-cache@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    cache_keys = ["todos:user:bulk-cache"]
+
+    async def cached_scan_iter(match=None):
+        for key in cache_keys:
+            yield key
+
+    redis_mock.scan_iter = cached_scan_iter
+    todo_ids = []
+    for title in ("First", "Second"):
+        response = await client.post(
+            "/api/v1/todos", json={"title": title}, headers=headers
+        )
+        todo_ids.append(response.json()["id"])
+    redis_mock.delete_many.reset_mock()
+
+    response = await client.patch(
+        "/api/v1/todos/bulk-status",
+        json={"todo_ids": todo_ids, "completed": True},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert {item["completed"] for item in response.json()} == {True}
+    redis_mock.delete_many.assert_called_with(cache_keys)

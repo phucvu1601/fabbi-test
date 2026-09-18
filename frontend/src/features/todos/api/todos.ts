@@ -78,8 +78,8 @@ export function useCreateTodo() {
       const response = await api.post("/todos", data);
       return response.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["todos"] });
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["todos"] });
       toast.success("Todo created successfully!");
     },
     onError: () => {
